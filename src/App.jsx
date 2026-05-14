@@ -311,16 +311,19 @@ export default function App() {
 
           <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
             {[
-              { label: 'Debt Payments', val: debtMonthly,   icon: '📉', color: '#c0656a' },
-              { label: 'Baby Fund',     val: babyTotal,     icon: '👶', color: '#b07fc4' },
-              { label: 'Savings',       val: savingsTotal,  icon: '🏦', color: '#4ab8c4' },
-              { label: 'Spending',      val: spendingTotal, icon: '💸', color: '#e8a87c' },
-            ].map(s => (
-              <div key={s.label} style={{ background: '#1a1d27', border: `1px solid ${s.color}33`, borderRadius: 10, padding: '8px 12px', flex: '1 1 90px' }}>
-                <div style={{ fontSize: 10, color: '#7a8099', marginBottom: 2 }}>{s.icon} {s.label}</div>
-                <div style={{ fontSize: 15, color: s.color, fontVariantNumeric: 'tabular-nums' }}>{fmt(s.val)}</div>
-              </div>
-            ))}
+              { catId: 'debt',     val: debtMonthly,   icon: '📉', color: '#c0656a' },
+              { catId: 'baby',     val: babyTotal,     icon: '👶', color: '#b07fc4' },
+              { catId: 'personal', val: savingsTotal,  icon: '🏦', color: '#4ab8c4' },
+              { catId: 'spending', val: spendingTotal, icon: '💸', color: '#e8a87c' },
+            ].map(s => {
+              const label = categories.find(c => c.id === s.catId)?.label || s.catId
+              return (
+                <div key={s.catId} style={{ background: '#1a1d27', border: `1px solid ${s.color}33`, borderRadius: 10, padding: '8px 12px', flex: '1 1 90px' }}>
+                  <div style={{ fontSize: 10, color: '#7a8099', marginBottom: 2 }}>{s.icon} {label}</div>
+                  <div style={{ fontSize: 15, color: s.color, fontVariantNumeric: 'tabular-nums' }}>{fmt(s.val)}</div>
+                </div>
+              )
+            })}
           </div>
 
           {/* Tabs */}
