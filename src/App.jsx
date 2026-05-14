@@ -88,9 +88,13 @@ export default function App() {
   const [newPurchaseName, setNewPurchaseName] = useState('')
   const [newPurchaseAmount, setNewPurchaseAmount] = useState('')
 
+  // History snapshots: [{ key, label, date, totalSpent, totalOwed, savingsMonthly, debtMonthly, babyMonthly, purchases, categoryTotals }]
+  const [snapshots, setSnapshots] = useState([])
+
   const nextDebtId   = useRef(100)
   const saveTimeout  = useRef(null)
   const isFirstLoad  = useRef(true)
+  const lastSnapshotKey = useRef(null)
 
   const currentFortnightKey = getFortnightKey()
 
@@ -110,12 +114,16 @@ export default function App() {
             }
             if (data.fortnightChecks) setFortnightChecks(data.fortnightChecks)
             if (data.fortnightPurchases) setFortnightPurchases(data.fortnightPurchases)
+            if (data.snapshots) {
+              setSnapshots(data.snapshots)
+              if (data.snapshots.length > 0) lastSnapshotKey.current = data.snapshots[data.snapshots.length - 1].key
+            }
             isFirstLoad.current = false
           }
           setSyncStatus('synced')
         } else {
           isFirstLoad.current = false
-          saveToFirebase(initialCategories, initialDebts, {}, {})
+          saveToFirebase(initialCategories, initialDebts, {}, {}, [])
         }
       },
       err => { console.error(err); setSyncStatus('error'); isFirstLoad.current = false }
@@ -124,13 +132,13 @@ export default function App() {
   }, [])
 
   // ── Firebase: save ────────────────────────────────────────────────────────
-  const saveToFirebase = useCallback((cats, dts, checks, purch) => {
+  const saveToFirebase = useCallback((cats, dts, checks, purch, snaps) => {
     setSyncStatus('saving')
     clearTimeout(saveTimeout.current)
     saveTimeout.current = setTimeout(async () => {
       try {
         await setDoc(doc(db, 'budgets', DOC_ID), {
-          categories: cats, debts: dts, fortnightChecks: checks, fortnightPurchases: purch,
+          categories: cats, debts: dts, fortnightChecks: checks, fortnightPurchases: purch, snapshots: snaps,
           updatedAt: new Date().toISOString()
         })
         setSyncStatus('synced')
@@ -139,8 +147,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!isFirstLoad.current) saveToFirebase(categories, debts, fortnightChecks, fortnightPurchases)
-  }, [categories, debts, fortnightChecks, fortnightPurchases, saveToFirebase])
+    if (!isFirstLoad.current) saveToFirebase(categories, debts, fortnightChecks, fortnightPurchases, snapshots)
+  }, [categories, debts, fortnightChecks, fortnightPurchases, snapshots, saveToFirebase])
 
   // ── Derived budget values ─────────────────────────────────────────────────
   const totalSpent    = categories.flatMap(c => c.items).reduce((s, i) => s + i.amount, 0)
@@ -158,6 +166,38 @@ export default function App() {
   const totalOwed       = activeDebts.reduce((s, d) => s + d.currentBalance, 0)
   const totalOriginal   = debts.reduce((s, d) => s + d.originalBalance, 0)
   const overallProgress = totalOriginal > 0 ? ((totalOriginal - totalOwed) / totalOriginal) * 100 : 0
+
+  // ── Snapshot recording (saves a snapshot each new fortnight) ───────────────
+  useEffect(() => {
+    if (isFirstLoad.current) return
+    const key = currentFortnightKey
+    if (lastSnapshotKey.current === key) return
+    lastSnapshotKey.current = key
+    const now = new Date()
+    const label = now.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Australia/Melbourne' })
+    const categoryTotals = categories.map(c => ({
+      id: c.id, label: c.label, icon: c.icon, color: c.color,
+      total: c.items.reduce((s, i) => s + i.amount, 0)
+    }))
+    const purchases = fortnightPurchases[key] || []
+    const totalPurch = purchases.reduce((s, p) => s + p.amount, 0)
+    const snapshot = {
+      key, label, date: now.toISOString(),
+      income: INCOME,
+      totalSpent,
+      totalOwed,
+      savingsMonthly: savingsTotal,
+      debtMonthly,
+      babyMonthly: babyTotal,
+      spendingMonthly: spendingTotal,
+      totalPurchases: totalPurch,
+      categoryTotals,
+    }
+    setSnapshots(prev => {
+      if (prev.some(s => s.key === key)) return prev
+      return [...prev, snapshot].slice(-24) // keep last 24 fortnights (~1 year)
+    })
+  }, [currentFortnightKey])
 
   // ── Fortnightly checklist helpers ─────────────────────────────────────────
   const currentChecks = fortnightChecks[currentFortnightKey] || {}
@@ -377,7 +417,7 @@ export default function App() {
 
           {/* Tabs */}
           <div style={{ display: 'flex', marginTop: 18 }}>
-            {[['budget', '📋 Budget'], ['fortnight', '📅 Fortnightly'], ['debts', '💳 Debts']].map(([id, label]) => (
+            {[['budget', '📋 Budget'], ['fortnight', '📅 Fortnightly'], ['debts', '💳 Debts'], ['reports', '📊 Reports']].map(([id, label]) => (
               <button key={id} onClick={() => setActiveTab(id)} style={{
                 background: 'none', border: 'none',
                 borderBottom: activeTab === id ? '2px solid #e8e2d9' : '2px solid transparent',
@@ -854,6 +894,167 @@ export default function App() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* ══ REPORTS TAB ══ */}
+        <div style={{ display: activeTab === 'reports' ? 'block' : 'none' }}>
+
+          {/* Header */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, letterSpacing: '0.2em', color: '#7a8099', textTransform: 'uppercase', marginBottom: 4 }}>Overview</div>
+            <div style={{ fontSize: 22, color: '#e8e2d9' }}>📊 Financial Reports</div>
+          </div>
+
+          {/* ── Current snapshot summary cards ── */}
+          <div style={{ fontSize: 12, color: '#7a8099', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>This Month at a Glance</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 28 }}>
+            {[
+              { label: 'Monthly Income',    val: INCOME,            color: '#6ab187', icon: '💰' },
+              { label: 'Total Expenses',    val: totalSpent,        color: '#e07b54', icon: '📤' },
+              { label: 'Remaining',         val: INCOME - totalSpent, color: (INCOME - totalSpent) >= 0 ? '#4ab8c4' : '#c0656a', icon: '🏷️' },
+              { label: 'Debt Payments',     val: debtMonthly,       color: '#c0656a', icon: '📉' },
+              { label: 'Baby Fund',         val: babyTotal,         color: '#b07fc4', icon: '👶' },
+              { label: 'Savings',           val: savingsTotal,      color: '#4ab8c4', icon: '🏦' },
+              { label: 'Total Debt Owed',   val: totalOwed,         color: '#c0656a', icon: '💳' },
+              { label: 'Debt Cleared',      val: totalOriginal - totalOwed, color: '#6ab187', icon: '✅' },
+            ].map(s => (
+              <div key={s.label} style={{ background: '#161924', border: `1px solid ${s.color}33`, borderRadius: 12, padding: '14px 16px' }}>
+                <div style={{ fontSize: 11, color: '#7a8099', marginBottom: 6 }}>{s.icon} {s.label}</div>
+                <div style={{ fontSize: 18, color: s.color, fontVariantNumeric: 'tabular-nums', fontWeight: 'bold' }}>{fmt(s.val)}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Debt paydown progress ── */}
+          <div style={{ fontSize: 12, color: '#7a8099', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Debt Paydown Progress</div>
+          <div style={{ background: '#161924', borderRadius: 14, border: '1px solid #c0656a33', padding: '18px 20px', marginBottom: 28 }}>
+            {debts.length === 0 && <div style={{ color: '#7a8099', fontSize: 13 }}>No debts added yet.</div>}
+            {debts.map(debt => {
+              const progress = debt.originalBalance > 0 ? ((debt.originalBalance - debt.currentBalance) / debt.originalBalance) * 100 : 100
+              const color = progress >= 75 ? '#6ab187' : progress >= 40 ? '#d4a843' : '#c0656a'
+              return (
+                <div key={debt.id} style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                    <span style={{ color: debt.paid ? '#6ab187' : '#e8e2d9' }}>{debt.paid ? '✅ ' : ''}{debt.name}</span>
+                    <span style={{ color: '#7a8099', fontVariantNumeric: 'tabular-nums' }}>
+                      {fmt(debt.currentBalance)} left of {fmt(debt.originalBalance)}
+                    </span>
+                  </div>
+                  <div style={{ height: 10, background: '#2a2d3a', borderRadius: 5, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', borderRadius: 5, width: `${progress}%`, background: `linear-gradient(90deg, ${color}88, ${color})`, transition: 'width 0.5s' }} />
+                  </div>
+                  <div style={{ fontSize: 11, color, marginTop: 4 }}>{progress.toFixed(1)}% paid off — {fmt(debt.originalBalance - debt.currentBalance)} cleared</div>
+                </div>
+              )
+            })}
+            {totalOriginal > 0 && (
+              <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px solid #2a2d3a' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#7a8099', marginBottom: 6 }}>
+                  <span>Overall debt progress</span>
+                  <span>{fmt(totalOriginal - totalOwed)} of {fmt(totalOriginal)} cleared</span>
+                </div>
+                <div style={{ height: 8, background: '#2a2d3a', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', borderRadius: 4, width: `${overallProgress}%`, background: 'linear-gradient(90deg, #c0656a88, #e07b54)', transition: 'width 0.5s' }} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Budget category breakdown ── */}
+          <div style={{ fontSize: 12, color: '#7a8099', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Budget Category Breakdown</div>
+          <div style={{ background: '#161924', borderRadius: 14, border: '1px solid #2a2d3a', padding: '18px 20px', marginBottom: 28 }}>
+            {categories.map(cat => {
+              const catTotal = cat.items.reduce((s, i) => s + i.amount, 0)
+              const pct = totalSpent > 0 ? (catTotal / totalSpent) * 100 : 0
+              return (
+                <div key={cat.id} style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 5 }}>
+                    <span style={{ color: '#e8e2d9' }}>{cat.icon} {cat.label}</span>
+                    <span style={{ color: cat.color, fontVariantNumeric: 'tabular-nums' }}>{fmt(catTotal)} <span style={{ color: '#7a8099', fontSize: 11 }}>({pct.toFixed(0)}%)</span></span>
+                  </div>
+                  <div style={{ height: 7, background: '#2a2d3a', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', borderRadius: 4, width: `${pct}%`, background: `linear-gradient(90deg, ${cat.color}88, ${cat.color})` }} />
+                  </div>
+                </div>
+              )
+            })}
+            <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid #2a2d3a', display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+              <span style={{ color: '#7a8099' }}>Total monthly expenses</span>
+              <span style={{ color: '#e8e2d9', fontVariantNumeric: 'tabular-nums', fontWeight: 'bold' }}>{fmt(totalSpent)}</span>
+            </div>
+          </div>
+
+          {/* ── Fortnightly spending vs income ── */}
+          <div style={{ fontSize: 12, color: '#7a8099', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Spending vs Income (Fortnightly)</div>
+          <div style={{ background: '#161924', borderRadius: 14, border: '1px solid #2a2d3a', padding: '18px 20px', marginBottom: 28 }}>
+            {[
+              { label: 'Fortnightly Income',   val: FORTNIGHTLY_INCOME, color: '#6ab187', w: 100 },
+              { label: 'Budgeted Expenses',     val: totalSpent / 2,     color: '#e07b54', w: (totalSpent / 2) / FORTNIGHTLY_INCOME * 100 },
+              { label: 'Purchases This Period', val: (fortnightPurchases[currentFortnightKey] || []).reduce((s,p) => s + p.amount, 0), color: '#e8a87c', w: Math.min(100, (fortnightPurchases[currentFortnightKey] || []).reduce((s,p) => s + p.amount, 0) / FORTNIGHTLY_INCOME * 100) },
+            ].map(row => (
+              <div key={row.label} style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 5 }}>
+                  <span style={{ color: '#b0b8cc' }}>{row.label}</span>
+                  <span style={{ color: row.color, fontVariantNumeric: 'tabular-nums' }}>{fmt(row.val)}</span>
+                </div>
+                <div style={{ height: 8, background: '#2a2d3a', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', borderRadius: 4, width: `${Math.min(100, row.w)}%`, background: `linear-gradient(90deg, ${row.color}88, ${row.color})` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Month by month history ── */}
+          <div style={{ fontSize: 12, color: '#7a8099', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 10 }}>Fortnightly History</div>
+          {snapshots.length === 0 ? (
+            <div style={{ background: '#161924', borderRadius: 14, border: '1px solid #2a2d3a', padding: '28px 20px', textAlign: 'center' }}>
+              <div style={{ fontSize: 24, marginBottom: 10 }}>📅</div>
+              <div style={{ fontSize: 14, color: '#7a8099' }}>History builds up over time.</div>
+              <div style={{ fontSize: 12, color: '#3a4060', marginTop: 6 }}>A snapshot is saved automatically at the start of each new fortnight.</div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {[...snapshots].reverse().map(snap => {
+                const leftover = snap.income - snap.totalSpent - (snap.totalPurchases || 0)
+                const leftColor = leftover >= 0 ? '#6ab187' : '#c0656a'
+                return (
+                  <div key={snap.key} style={{ background: '#161924', border: '1px solid #2a2d3a', borderRadius: 14, padding: '16px 20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 14, color: '#e8e2d9' }}>{snap.label}</div>
+                        <div style={{ fontSize: 11, color: '#7a8099', marginTop: 2 }}>Fortnight snapshot</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 11, color: '#7a8099' }}>Leftover</div>
+                        <div style={{ fontSize: 18, color: leftColor, fontVariantNumeric: 'tabular-nums', fontWeight: 'bold' }}>{fmt(Math.abs(leftover))}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
+                      {[
+                        { label: 'Income',     val: snap.income,          color: '#6ab187' },
+                        { label: 'Expenses',   val: snap.totalSpent,      color: '#e07b54' },
+                        { label: 'Purchases',  val: snap.totalPurchases || 0, color: '#e8a87c' },
+                        { label: 'Debt Owed',  val: snap.totalOwed,       color: '#c0656a' },
+                        { label: 'Savings',    val: snap.savingsMonthly,  color: '#4ab8c4' },
+                        { label: 'Baby Fund',  val: snap.babyMonthly,     color: '#b07fc4' },
+                      ].map(s => (
+                        <div key={s.label} style={{ background: '#1a1d27', borderRadius: 8, padding: '8px 12px' }}>
+                          <div style={{ fontSize: 10, color: '#7a8099', marginBottom: 2 }}>{s.label}</div>
+                          <div style={{ fontSize: 13, color: s.color, fontVariantNumeric: 'tabular-nums' }}>{fmt(s.val)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <div style={{ marginTop: 24, padding: '14px 18px', background: '#161924', borderRadius: 12, border: '1px solid #2a2d3a', fontSize: 12, color: '#7a8099', lineHeight: 1.8 }}>
+            <div>• Snapshots are saved automatically at the start of each new fortnight.</div>
+            <div>• History keeps up to <span style={{ color: '#e8e2d9' }}>24 fortnights</span> (~1 year) of data.</div>
+            <div>• All figures sync across your phone and computer via Firebase ☁️</div>
+          </div>
         </div>
 
       </div>
