@@ -6,12 +6,12 @@ import { initializeApp } from 'firebase/app'
 import { getFirestore } from 'firebase/firestore'
 
 const firebaseConfig = {
-  apiKey: "PASTE_YOUR_API_KEY_HERE",
-  authDomain: "PASTE_YOUR_AUTH_DOMAIN_HERE",
-  projectId: "PASTE_YOUR_PROJECT_ID_HERE",
-  storageBucket: "PASTE_YOUR_STORAGE_BUCKET_HERE",
-  messagingSenderId: "PASTE_YOUR_MESSAGING_SENDER_ID_HERE",
-  appId: "PASTE_YOUR_APP_ID_HERE"
+  apiKey: "AIzaSyAkyGDVCWPGS_7rfhj56vDUSs1hvfaPH1k",
+  authDomain: "personal-budget-1ebe3.firebaseapp.com",
+  projectId: "personal-budget-1ebe3",
+  storageBucket: "personal-budget-1ebe3.firebasestorage.app",
+  messagingSenderId: "885010100680",
+  appId: "1:885010100680:web:f5d63c7b16f3ef8a7ad0fd"
 }
 
 const app = initializeApp(firebaseConfig)
