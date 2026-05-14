@@ -536,8 +536,36 @@ export default function App() {
             })}
           </div>
 
+          {/* Leftover card */}
+          {(() => {
+            const leftover = FORTNIGHTLY_INCOME - totalFortnightly
+            const leftoverColor = leftover >= 0 ? '#6ab187' : '#c0656a'
+            return (
+              <div style={{ marginTop: 14, background: '#161924', borderRadius: 14, border: `1px solid ${leftoverColor}33`, padding: '16px 20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#7a8099', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 3 }}>
+                      {leftover >= 0 ? '💰 Leftover after all expenses' : '⚠️ Over fortnightly income by'}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#7a8099' }}>
+                      {fmt(FORTNIGHTLY_INCOME)} income − {fmt(totalFortnightly)} expenses
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 26, color: leftoverColor, fontVariantNumeric: 'tabular-nums', fontWeight: 'bold' }}>
+                    {leftover >= 0 ? '' : '-'}{fmt(Math.abs(leftover))}
+                  </div>
+                </div>
+                {leftover > 0 && (
+                  <div style={{ marginTop: 10, fontSize: 12, color: '#7a8099' }}>
+                    Tip: put this <span style={{ color: '#e8e2d9' }}>{fmt(leftover)}</span> toward your baby fund or extra debt payment 👶
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
           {/* Reset button */}
-          <div style={{ marginTop: 20, textAlign: 'center' }}>
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
             <button
               onClick={() => setFortnightChecks(prev => ({ ...prev, [currentFortnightKey]: {} }))}
               style={{ background: 'none', border: '1px solid #2a2d3a', borderRadius: 8, color: '#7a8099', fontSize: 12, padding: '8px 20px', cursor: 'pointer', fontFamily: 'inherit', transition: 'border-color 0.15s, color 0.15s' }}
@@ -547,7 +575,7 @@ export default function App() {
             </button>
           </div>
 
-          <div style={{ marginTop: 20, padding: '14px 18px', background: '#161924', borderRadius: 12, border: '1px solid #2a2d3a', fontSize: 12, color: '#7a8099', lineHeight: 1.8 }}>
+          <div style={{ marginTop: 16, padding: '14px 18px', background: '#161924', borderRadius: 12, border: '1px solid #2a2d3a', fontSize: 12, color: '#7a8099', lineHeight: 1.8 }}>
             <div>• Amounts shown are <span style={{ color: '#e8e2d9' }}>half your monthly budget</span> — what you need to set aside each pay.</div>
             <div>• Ticks reset automatically each new fortnight (every second Tuesday).</div>
             <div>• To change amounts, update them in the <span style={{ color: '#e8e2d9' }}>📋 Budget tab</span>.</div>
