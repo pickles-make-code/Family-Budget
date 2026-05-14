@@ -83,6 +83,11 @@ export default function App() {
   // Fortnightly checklist state: { [fortnightKey]: { [itemKey]: bool } }
   const [fortnightChecks, setFortnightChecks] = useState({})
 
+  // Fortnightly purchases: { [fortnightKey]: [{ id, name, amount }] }
+  const [fortnightPurchases, setFortnightPurchases] = useState({})
+  const [newPurchaseName, setNewPurchaseName] = useState('')
+  const [newPurchaseAmount, setNewPurchaseAmount] = useState('')
+
   const nextDebtId   = useRef(100)
   const saveTimeout  = useRef(null)
   const isFirstLoad  = useRef(true)
@@ -104,12 +109,13 @@ export default function App() {
               nextDebtId.current = maxId + 1
             }
             if (data.fortnightChecks) setFortnightChecks(data.fortnightChecks)
+            if (data.fortnightPurchases) setFortnightPurchases(data.fortnightPurchases)
             isFirstLoad.current = false
           }
           setSyncStatus('synced')
         } else {
           isFirstLoad.current = false
-          saveToFirebase(initialCategories, initialDebts, {})
+          saveToFirebase(initialCategories, initialDebts, {}, {})
         }
       },
       err => { console.error(err); setSyncStatus('error'); isFirstLoad.current = false }
@@ -118,13 +124,13 @@ export default function App() {
   }, [])
 
   // ── Firebase: save ────────────────────────────────────────────────────────
-  const saveToFirebase = useCallback((cats, dts, checks) => {
+  const saveToFirebase = useCallback((cats, dts, checks, purch) => {
     setSyncStatus('saving')
     clearTimeout(saveTimeout.current)
     saveTimeout.current = setTimeout(async () => {
       try {
         await setDoc(doc(db, 'budgets', DOC_ID), {
-          categories: cats, debts: dts, fortnightChecks: checks,
+          categories: cats, debts: dts, fortnightChecks: checks, fortnightPurchases: purch,
           updatedAt: new Date().toISOString()
         })
         setSyncStatus('synced')
@@ -133,8 +139,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!isFirstLoad.current) saveToFirebase(categories, debts, fortnightChecks)
-  }, [categories, debts, fortnightChecks, saveToFirebase])
+    if (!isFirstLoad.current) saveToFirebase(categories, debts, fortnightChecks, fortnightPurchases)
+  }, [categories, debts, fortnightChecks, fortnightPurchases, saveToFirebase])
 
   // ── Derived budget values ─────────────────────────────────────────────────
   const totalSpent    = categories.flatMap(c => c.items).reduce((s, i) => s + i.amount, 0)
@@ -190,6 +196,30 @@ export default function App() {
         return { ...d, currentBalance: newBal, paid: nowPaid }
       }))
     }
+  }
+
+  // ── Purchases helpers ────────────────────────────────────────────────────
+  const currentPurchases = fortnightPurchases[currentFortnightKey] || []
+  const totalPurchases = currentPurchases.reduce((s, p) => s + p.amount, 0)
+
+  function addPurchase() {
+    const name = newPurchaseName.trim()
+    const amount = parseFloat(newPurchaseAmount)
+    if (!name || isNaN(amount) || amount <= 0) return
+    const purchase = { id: Date.now(), name, amount: Math.round(amount * 100) / 100 }
+    setFortnightPurchases(prev => ({
+      ...prev,
+      [currentFortnightKey]: [...(prev[currentFortnightKey] || []), purchase]
+    }))
+    setNewPurchaseName('')
+    setNewPurchaseAmount('')
+  }
+
+  function removePurchase(id) {
+    setFortnightPurchases(prev => ({
+      ...prev,
+      [currentFortnightKey]: (prev[currentFortnightKey] || []).filter(p => p.id !== id)
+    }))
   }
 
   // Build fortnightly items from categories (halved monthly amounts)
@@ -558,28 +588,92 @@ export default function App() {
             })}
           </div>
 
+          {/* Purchases section */}
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 11, letterSpacing: '0.2em', color: '#7a8099', textTransform: 'uppercase', marginBottom: 12 }}>🛍️ Purchases This Fortnight</div>
+
+            {/* Add purchase row */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+              <input
+                value={newPurchaseName}
+                onChange={e => setNewPurchaseName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addPurchase() }}
+                placeholder="What did you buy?"
+                style={{ flex: '2 1 160px', background: '#1e2130', border: '1px solid #3a4060', borderRadius: 8, color: '#e8e2d9', fontSize: 13, padding: '8px 12px', outline: 'none', fontFamily: 'inherit' }}
+              />
+              <input
+                value={newPurchaseAmount}
+                onChange={e => setNewPurchaseAmount(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addPurchase() }}
+                placeholder="$0.00"
+                type="number"
+                min="0"
+                step="0.01"
+                style={{ flex: '1 1 80px', background: '#1e2130', border: '1px solid #3a4060', borderRadius: 8, color: '#e8e2d9', fontSize: 13, padding: '8px 12px', outline: 'none', fontFamily: 'inherit', textAlign: 'right' }}
+              />
+              <button onClick={addPurchase}
+                style={{ background: '#e8a87c22', border: '1px solid #e8a87c66', borderRadius: 8, color: '#e8a87c', fontSize: 13, padding: '8px 16px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0, transition: 'background 0.15s' }}
+                onMouseEnter={e => e.currentTarget.style.background = '#e8a87c44'}
+                onMouseLeave={e => e.currentTarget.style.background = '#e8a87c22'}>
+                + Add
+              </button>
+            </div>
+
+            {/* Purchase list */}
+            {currentPurchases.length > 0 && (
+              <div style={{ background: '#161924', borderRadius: 12, border: '1px solid #e8a87c22', overflow: 'hidden', marginBottom: 4 }}>
+                {currentPurchases.map((p, idx) => (
+                  <div key={p.id}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 16px', borderBottom: idx < currentPurchases.length - 1 ? '1px solid #1e2130' : 'none', gap: 8 }}>
+                    <div style={{ fontSize: 13, color: '#b0b8cc', flex: 1 }}>{p.name}</div>
+                    <div style={{ fontSize: 13, color: '#e8a87c', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>−{fmt(p.amount)}</div>
+                    <button onClick={() => removePurchase(p.id)}
+                      style={{ background: 'none', border: 'none', color: '#c0656a66', fontSize: 12, cursor: 'pointer', padding: '2px 6px', transition: 'color 0.15s' }}
+                      onMouseEnter={e => e.currentTarget.style.color = '#c0656a'}
+                      onMouseLeave={e => e.currentTarget.style.color = '#c0656a66'}>✕</button>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 16px', background: '#1a1820', borderTop: '1px solid #e8a87c22' }}>
+                  <div style={{ fontSize: 12, color: '#7a8099' }}>Total spent</div>
+                  <div style={{ fontSize: 14, color: '#e8a87c', fontVariantNumeric: 'tabular-nums', fontWeight: 'bold' }}>−{fmt(totalPurchases)}</div>
+                </div>
+              </div>
+            )}
+
+            {currentPurchases.length === 0 && (
+              <div style={{ fontSize: 12, color: '#3a4060', textAlign: 'center', padding: '16px', background: '#161924', borderRadius: 12, border: '1px dashed #2a2d3a' }}>
+                No purchases logged yet this fortnight
+              </div>
+            )}
+          </div>
+
           {/* Leftover card */}
           {(() => {
-            const leftover = FORTNIGHTLY_INCOME - totalFortnightly
+            const leftover = FORTNIGHTLY_INCOME - totalFortnightly - totalPurchases
             const leftoverColor = leftover >= 0 ? '#6ab187' : '#c0656a'
             return (
               <div style={{ marginTop: 14, background: '#161924', borderRadius: 14, border: `1px solid ${leftoverColor}33`, padding: '16px 20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                   <div>
                     <div style={{ fontSize: 11, color: '#7a8099', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 3 }}>
-                      {leftover >= 0 ? '💰 Leftover after all expenses' : '⚠️ Over fortnightly income by'}
+                      {leftover >= 0 ? '💰 Remaining this fortnight' : '⚠️ Over budget this fortnight'}
                     </div>
                     <div style={{ fontSize: 12, color: '#7a8099' }}>
-                      {fmt(FORTNIGHTLY_INCOME)} income − {fmt(totalFortnightly)} expenses
+                      {fmt(FORTNIGHTLY_INCOME)} income − {fmt(totalFortnightly)} expenses − {fmt(totalPurchases)} purchases
                     </div>
                   </div>
                   <div style={{ fontSize: 26, color: leftoverColor, fontVariantNumeric: 'tabular-nums', fontWeight: 'bold' }}>
-                    {leftover >= 0 ? '' : '-'}{fmt(Math.abs(leftover))}
+                    {fmt(Math.abs(leftover))}
                   </div>
                 </div>
-                {leftover > 0 && (
+                {leftover > 0 && totalPurchases === 0 && (
                   <div style={{ marginTop: 10, fontSize: 12, color: '#7a8099' }}>
                     Tip: put this <span style={{ color: '#e8e2d9' }}>{fmt(leftover)}</span> toward your baby fund or extra debt payment 👶
+                  </div>
+                )}
+                {leftover < 0 && (
+                  <div style={{ marginTop: 10, fontSize: 12, color: '#c0656a' }}>
+                    You've spent {fmt(Math.abs(leftover))} more than your fortnightly income this period.
                   </div>
                 )}
               </div>
@@ -589,17 +683,20 @@ export default function App() {
           {/* Reset button */}
           <div style={{ marginTop: 16, textAlign: 'center' }}>
             <button
-              onClick={() => setFortnightChecks(prev => ({ ...prev, [currentFortnightKey]: {} }))}
+              onClick={() => {
+                setFortnightChecks(prev => ({ ...prev, [currentFortnightKey]: {} }))
+                setFortnightPurchases(prev => ({ ...prev, [currentFortnightKey]: [] }))
+              }}
               style={{ background: 'none', border: '1px solid #2a2d3a', borderRadius: 8, color: '#7a8099', fontSize: 12, padding: '8px 20px', cursor: 'pointer', fontFamily: 'inherit', transition: 'border-color 0.15s, color 0.15s' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = '#4a5070'; e.currentTarget.style.color = '#b0b8cc' }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = '#2a2d3a'; e.currentTarget.style.color = '#7a8099' }}>
-              ↺ Reset this fortnight's ticks
+              ↺ Reset this fortnight's ticks & purchases
             </button>
           </div>
 
           <div style={{ marginTop: 16, padding: '14px 18px', background: '#161924', borderRadius: 12, border: '1px solid #2a2d3a', fontSize: 12, color: '#7a8099', lineHeight: 1.8 }}>
             <div>• Amounts shown are <span style={{ color: '#e8e2d9' }}>half your monthly budget</span> — what you need to set aside each pay.</div>
-            <div>• Ticks reset automatically each new fortnight (every second Tuesday).</div>
+            <div>• Ticks and purchases reset automatically each new fortnight (every second Tuesday at 9pm).</div>
             <div>• To change amounts, update them in the <span style={{ color: '#e8e2d9' }}>📋 Budget tab</span>.</div>
           </div>
         </div>
