@@ -28,31 +28,27 @@ const initialDebts = [
 
 function fmt(n) { return n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD' }) }
 
-// Get the current fortnightly period key (e.g. "2026-W03") based on pay Tuesday
+// Anchor: Tue 26 May 2026 at 9pm Melbourne time (AEST = UTC+10)
+// Melbourne is UTC+10 standard, UTC+11 daylight saving (May is AEST so UTC+10)
+const ANCHOR_MS = new Date('2026-05-26T21:00:00+10:00').getTime()
+const FORTNIGHT_MS = 14 * 24 * 60 * 60 * 1000
+
+// Get the current fortnightly period key anchored to Tue 26 May 2026 9pm AEST
 function getFortnightKey() {
-  const now = new Date()
-  // Find most recent Tuesday
-  const day = now.getDay() // 0=Sun, 2=Tue
-  const diff = (day >= 2) ? day - 2 : day + 5
-  const lastTuesday = new Date(now)
-  lastTuesday.setDate(now.getDate() - diff)
-  lastTuesday.setHours(0, 0, 0, 0)
-  // Fortnight number: days since epoch / 14
-  const epochDays = Math.floor(lastTuesday.getTime() / (1000 * 60 * 60 * 24))
-  const fortnightNum = Math.floor(epochDays / 14)
-  return `fortnight-${fortnightNum}`
+  const now = Date.now()
+  // How many fortnights have elapsed since the anchor?
+  const elapsed = now - ANCHOR_MS
+  const fortnightNum = elapsed < 0 ? -1 : Math.floor(elapsed / FORTNIGHT_MS)
+  return `fortnight-anchor-${fortnightNum}`
 }
 
 function getFortnightDates() {
-  const now = new Date()
-  const day = now.getDay()
-  const diff = (day >= 2) ? day - 2 : day + 5
-  const start = new Date(now)
-  start.setDate(now.getDate() - diff)
-  start.setHours(0, 0, 0, 0)
-  const end = new Date(start)
-  end.setDate(start.getDate() + 13)
-  const opts = { day: 'numeric', month: 'short' }
+  const now = Date.now()
+  const elapsed = now - ANCHOR_MS
+  const fortnightNum = elapsed < 0 ? 0 : Math.floor(elapsed / FORTNIGHT_MS)
+  const start = new Date(ANCHOR_MS + fortnightNum * FORTNIGHT_MS)
+  const end = new Date(start.getTime() + FORTNIGHT_MS - 1)
+  const opts = { day: 'numeric', month: 'short', timeZone: 'Australia/Melbourne' }
   return `${start.toLocaleDateString('en-AU', opts)} – ${end.toLocaleDateString('en-AU', opts)}`
 }
 
