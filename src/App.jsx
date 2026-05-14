@@ -160,17 +160,40 @@ export default function App() {
   // ── Fortnightly checklist helpers ─────────────────────────────────────────
   const currentChecks = fortnightChecks[currentFortnightKey] || {}
 
-  function toggleCheck(itemKey) {
+  // Items that auto-deduct from a named debt when ticked (and add back when unticked)
+  const DEBT_LINKED_ITEMS = {
+    'transport__Car Rego':      'Car',
+    'transport__Car Insurance': 'Car',
+  }
+
+  function toggleCheck(itemKey, fortnightAmount) {
+    const wasChecked = !!(fortnightChecks[currentFortnightKey] || {})[itemKey]
+    const nowChecked = !wasChecked
+
     setFortnightChecks(prev => {
       const prevChecks = prev[currentFortnightKey] || {}
       return {
         ...prev,
-        [currentFortnightKey]: {
-          ...prevChecks,
-          [itemKey]: !prevChecks[itemKey]
-        }
+        [currentFortnightKey]: { ...prevChecks, [itemKey]: nowChecked }
       }
     })
+
+    // If linked to a debt, deduct when ticking, add back when unticking
+    const linkedDebtName = DEBT_LINKED_ITEMS[itemKey]
+    if (linkedDebtName) {
+      setDebts(ds => ds.map(d => {
+        if (d.name !== linkedDebtName || d.paid) return d
+        const newBal = nowChecked
+          ? Math.max(0, Math.round((d.currentBalance - fortnightAmount) * 100) / 100)
+          : Math.min(d.originalBalance, Math.round((d.currentBalance + fortnightAmount) * 100) / 100)
+        const nowPaid = newBal === 0
+        if (nowPaid) {
+          setCelebrating(d.id)
+          setTimeout(() => setCelebrating(null), 3000)
+        }
+        return { ...d, currentBalance: newBal, paid: nowPaid }
+      }))
+    }
   }
 
   // Build fortnightly items from categories (halved monthly amounts)
@@ -490,7 +513,7 @@ export default function App() {
                       const checked = !!currentChecks[item.key]
                       return (
                         <div key={item.key}
-                          onClick={() => toggleCheck(item.key)}
+                          onClick={() => toggleCheck(item.key, item.fortnightAmount)}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 12,
                             padding: '10px 16px',
