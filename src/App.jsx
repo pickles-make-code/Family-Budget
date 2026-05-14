@@ -161,14 +161,16 @@ export default function App() {
   const currentChecks = fortnightChecks[currentFortnightKey] || {}
 
   function toggleCheck(itemKey) {
-    const updated = {
-      ...fortnightChecks,
-      [currentFortnightKey]: {
-        ...currentChecks,
-        [itemKey]: !currentChecks[itemKey]
+    setFortnightChecks(prev => {
+      const prevChecks = prev[currentFortnightKey] || {}
+      return {
+        ...prev,
+        [currentFortnightKey]: {
+          ...prevChecks,
+          [itemKey]: !prevChecks[itemKey]
+        }
       }
-    }
-    setFortnightChecks(updated)
+    })
   }
 
   // Build fortnightly items from categories (halved monthly amounts)
