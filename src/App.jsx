@@ -91,9 +91,25 @@ export default function App() {
   // History snapshots: [{ key, label, date, totalSpent, totalOwed, savingsMonthly, debtMonthly, babyMonthly, purchases, categoryTotals }]
   const [snapshots, setSnapshots] = useState([])
 
-  const nextDebtId   = useRef(100)
-  const saveTimeout  = useRef(null)
-  const isFirstLoad  = useRef(true)
+  // Savings goals: [{ id, name, target, saved, color }]
+  const [savingsGoals, setSavingsGoals]     = useState([])
+  const [hoveredCat, setHoveredCat]         = useState(null)
+  const [hoveredGoal, setHoveredGoal]       = useState(null)
+  const [editingGoal, setEditingGoal]       = useState(null)
+  const [addingToGoal, setAddingToGoal]     = useState(null)
+  const [goalAddAmount, setGoalAddAmount]   = useState('')
+  const [newGoalName, setNewGoalName]       = useState('')
+  const [newGoalTarget, setNewGoalTarget]   = useState('')
+  const [showNewGoalForm, setShowNewGoalForm] = useState(false)
+
+  // Settings
+  const [settings, setSettings]             = useState({ pinnedCards: ['debt', 'personal', 'spending'] })
+  const [settingsDraft, setSettingsDraft]   = useState(null)
+
+  const nextDebtId      = useRef(100)
+  const nextGoalId      = useRef(200)
+  const saveTimeout     = useRef(null)
+  const isFirstLoad     = useRef(true)
   const lastSnapshotKey = useRef(null)
 
   const currentFortnightKey = getFortnightKey()
@@ -118,12 +134,18 @@ export default function App() {
               setSnapshots(data.snapshots)
               if (data.snapshots.length > 0) lastSnapshotKey.current = data.snapshots[data.snapshots.length - 1].key
             }
+            if (data.savingsGoals) {
+              setSavingsGoals(data.savingsGoals)
+              const maxId = Math.max(...data.savingsGoals.map(g => g.id), 199)
+              nextGoalId.current = maxId + 1
+            }
+            if (data.settings) setSettings(s => ({ ...s, ...data.settings }))
             isFirstLoad.current = false
           }
           setSyncStatus('synced')
         } else {
           isFirstLoad.current = false
-          saveToFirebase(initialCategories, initialDebts, {}, {}, [])
+          saveToFirebase(initialCategories, initialDebts, {}, {}, [], [], { pinnedCards: ['debt', 'personal', 'spending'] })
         }
       },
       err => { console.error(err); setSyncStatus('error'); isFirstLoad.current = false }
@@ -132,13 +154,13 @@ export default function App() {
   }, [])
 
   // ── Firebase: save ────────────────────────────────────────────────────────
-  const saveToFirebase = useCallback((cats, dts, checks, purch, snaps) => {
+  const saveToFirebase = useCallback((cats, dts, checks, purch, snaps, goals, sett) => {
     setSyncStatus('saving')
     clearTimeout(saveTimeout.current)
     saveTimeout.current = setTimeout(async () => {
       try {
         await setDoc(doc(db, 'budgets', DOC_ID), {
-          categories: cats, debts: dts, fortnightChecks: checks, fortnightPurchases: purch, snapshots: snaps,
+          categories: cats, debts: dts, fortnightChecks: checks, fortnightPurchases: purch, snapshots: snaps, savingsGoals: goals, settings: sett,
           updatedAt: new Date().toISOString()
         })
         setSyncStatus('synced')
@@ -147,8 +169,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!isFirstLoad.current) saveToFirebase(categories, debts, fortnightChecks, fortnightPurchases, snapshots)
-  }, [categories, debts, fortnightChecks, fortnightPurchases, snapshots, saveToFirebase])
+    if (!isFirstLoad.current) saveToFirebase(categories, debts, fortnightChecks, fortnightPurchases, snapshots, savingsGoals, settings)
+  }, [categories, debts, fortnightChecks, fortnightPurchases, snapshots, savingsGoals, settings, saveToFirebase])
 
   // ── Derived budget values ─────────────────────────────────────────────────
   const totalSpent    = categories.flatMap(c => c.items).reduce((s, i) => s + i.amount, 0)
@@ -166,6 +188,43 @@ export default function App() {
   const totalOwed       = activeDebts.reduce((s, d) => s + d.currentBalance, 0)
   const totalOriginal   = debts.reduce((s, d) => s + d.originalBalance, 0)
   const overallProgress = totalOriginal > 0 ? ((totalOriginal - totalOwed) / totalOriginal) * 100 : 0
+
+  // ── Category add/delete helpers ──────────────────────────────────────────
+  function addCategory() {
+    const colors = ['#e07b54','#d4a843','#5b9bd5','#6ab187','#c0656a','#b07fc4','#4ab8c4','#e8a87c','#7a8099','#a0c4a0']
+    const icons  = ['📁','🎯','🌿','🎓','🐾','🏋️','🎮','✈️','🎁','🔧']
+    const id = `custom-${Date.now()}`
+    const color = colors[Math.floor(Math.random() * colors.length)]
+    const icon  = icons[Math.floor(Math.random() * icons.length)]
+    setCategories(cats => [...cats, { id, label: 'New Category', icon, color, items: [{ name: 'New Item', amount: 0 }] }])
+    setTimeout(() => setEditing({ type: 'catLabel', catId: id }), 50)
+  }
+  function deleteCategory(catId) { setCategories(cats => cats.filter(c => c.id !== catId)) }
+
+  // ── Savings goal helpers ───────────────────────────────────────────────────
+  const GOAL_COLORS = ['#4ab8c4','#6ab187','#b07fc4','#d4a843','#e07b54','#5b9bd5']
+  function addGoal() {
+    const name = newGoalName.trim(); const target = parseFloat(newGoalTarget)
+    if (!name || isNaN(target) || target <= 0) return
+    const id = nextGoalId.current++
+    const color = GOAL_COLORS[(savingsGoals.length) % GOAL_COLORS.length]
+    setSavingsGoals(gs => [...gs, { id, name, target: Math.round(target * 100) / 100, saved: 0, color }])
+    setNewGoalName(''); setNewGoalTarget(''); setShowNewGoalForm(false)
+  }
+  function deleteGoal(id) { setSavingsGoals(gs => gs.filter(g => g.id !== id)) }
+  function addToGoal(id) {
+    const amount = parseFloat(goalAddAmount)
+    if (isNaN(amount) || amount <= 0) { setAddingToGoal(null); return }
+    setSavingsGoals(gs => gs.map(g => g.id !== id ? g : { ...g, saved: Math.min(g.target, Math.round((g.saved + amount) * 100) / 100) }))
+    setAddingToGoal(null); setGoalAddAmount('')
+  }
+  function commitGoalEdit(id, field, raw) {
+    const val = field === 'name' ? raw.trim() : parseFloat(raw)
+    if (field === 'name' && !val) { setEditingGoal(null); return }
+    if (field !== 'name' && isNaN(val)) { setEditingGoal(null); return }
+    setSavingsGoals(gs => gs.map(g => g.id !== id ? g : { ...g, [field]: field === 'name' ? val : Math.round(val * 100) / 100 }))
+    setEditingGoal(null)
+  }
 
   // ── Snapshot recording (saves a snapshot each new fortnight) ───────────────
   useEffect(() => {
@@ -417,7 +476,7 @@ export default function App() {
 
           {/* Tabs */}
           <div style={{ display: 'flex', marginTop: 18 }}>
-            {[['budget', '📋 Budget'], ['fortnight', '📅 Fortnightly'], ['debts', '💳 Debts'], ['reports', '📊 Reports']].map(([id, label]) => (
+            {[['budget', '📋 Budget'], ['fortnight', '📅 Fortnightly'], ['debts', '💳 Debts'], ['reports', '📊 Reports'], ['settings', '⚙️ Settings']].map(([id, label]) => (
               <button key={id} onClick={() => setActiveTab(id)} style={{
                 background: 'none', border: 'none',
                 borderBottom: activeTab === id ? '2px solid #e8e2d9' : '2px solid transparent',
@@ -511,6 +570,134 @@ export default function App() {
               )
             })}
           </div>
+          {/* Add Category button */}
+          <button onClick={addCategory}
+            style={{ marginTop: 14, background: 'none', border: '1px dashed #4a5070', borderRadius: 12, color: '#7a8099', fontSize: 13, padding: '14px', cursor: 'pointer', width: '100%', fontFamily: 'inherit', transition: 'border-color 0.15s, color 0.15s' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = '#8a90a8'; e.currentTarget.style.color = '#b0b8cc' }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = '#4a5070'; e.currentTarget.style.color = '#7a8099' }}>
+            + Add Category
+          </button>
+
+          {/* Savings Goals */}
+          <div style={{ marginTop: 32 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 11, letterSpacing: '0.15em', color: '#7a8099', textTransform: 'uppercase', marginBottom: 3 }}>Savings Goals</div>
+                <div style={{ fontSize: 20, color: '#e8e2d9' }}>🎯 Goals</div>
+              </div>
+              <button onClick={() => setShowNewGoalForm(v => !v)}
+                style={{ background: '#4ab8c422', border: '1px solid #4ab8c466', borderRadius: 8, color: '#4ab8c4', fontSize: 12, padding: '7px 14px', cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.15s' }}
+                onMouseEnter={e => e.currentTarget.style.background = '#4ab8c444'}
+                onMouseLeave={e => e.currentTarget.style.background = '#4ab8c422'}>
+                + New Goal
+              </button>
+            </div>
+
+            {/* New goal form */}
+            {showNewGoalForm && (
+              <div style={{ background: '#161924', border: '1px solid #4ab8c444', borderRadius: 12, padding: '16px 18px', marginBottom: 16 }}>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                  <input value={newGoalName} onChange={e => setNewGoalName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addGoal() }} placeholder="Goal name (e.g. Pram, Holiday)"
+                    style={{ flex: '2 1 160px', background: '#1e2130', border: '1px solid #4ab8c466', borderRadius: 8, color: '#e8e2d9', fontSize: 13, padding: '8px 12px', outline: 'none', fontFamily: 'inherit' }} />
+                  <div style={{ position: 'relative', flex: '1 1 100px' }}>
+                    <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#7a8099', fontSize: 13 }}>$</span>
+                    <input value={newGoalTarget} onChange={e => setNewGoalTarget(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addGoal() }} type="number" min="0" step="0.01" placeholder="Target"
+                      style={{ width: '100%', background: '#1e2130', border: '1px solid #4ab8c466', borderRadius: 8, color: '#e8e2d9', fontSize: 13, padding: '8px 12px 8px 22px', outline: 'none', fontFamily: 'inherit' }} />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={addGoal} style={{ flex: 1, background: '#4ab8c422', border: '1px solid #4ab8c466', borderRadius: 8, color: '#4ab8c4', fontSize: 13, padding: '8px', cursor: 'pointer', fontFamily: 'inherit' }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#4ab8c444'} onMouseLeave={e => e.currentTarget.style.background = '#4ab8c422'}>✓ Add Goal</button>
+                  <button onClick={() => { setShowNewGoalForm(false); setNewGoalName(''); setNewGoalTarget('') }} style={{ background: 'none', border: '1px solid #2a2d3a', borderRadius: 8, color: '#7a8099', fontSize: 13, padding: '8px 14px', cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Goal cards */}
+            {savingsGoals.length === 0 && !showNewGoalForm && (
+              <div style={{ background: '#161924', borderRadius: 12, border: '1px dashed #2a2d3a', padding: '24px 20px', textAlign: 'center', color: '#7a8099', fontSize: 13 }}>
+                No savings goals yet — hit "+ New Goal" to add one!
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {savingsGoals.map(goal => {
+                const pct = goal.target > 0 ? Math.min(100, (goal.saved / goal.target) * 100) : 0
+                const done = goal.saved >= goal.target
+                const isHov = hoveredGoal === goal.id
+                const isPaying = addingToGoal === goal.id
+                return (
+                  <div key={goal.id}
+                    onMouseEnter={() => setHoveredGoal(goal.id)}
+                    onMouseLeave={() => setHoveredGoal(null)}
+                    style={{ background: done ? '#1a2a1a' : '#161924', border: `1px solid ${done ? '#6ab18766' : goal.color + '44'}`, borderRadius: 14, padding: '16px 18px', transition: 'background 0.3s' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                      <div style={{ flex: 1 }}>
+                        {editingGoal?.id === goal.id && editingGoal.field === 'name'
+                          ? <AutoInput value={goal.name} onCommit={v => commitGoalEdit(goal.id, 'name', v)} onCancel={() => setEditingGoal(null)} style={{ background: '#1e2130', border: `1px solid ${goal.color}88`, borderRadius: 6, color: '#e8e2d9', fontSize: 15, padding: '3px 8px', outline: 'none', fontFamily: 'inherit', width: '100%' }} />
+                          : <div onClick={() => setEditingGoal({ id: goal.id, field: 'name' })} style={{ fontSize: 15, color: done ? '#6ab187' : '#e8e2d9', cursor: 'pointer', display: 'inline-block', borderBottom: '1px dashed transparent', transition: 'border-color 0.15s' }}
+                              onMouseEnter={e => e.currentTarget.style.borderBottomColor = '#e8e2d944'}
+                              onMouseLeave={e => e.currentTarget.style.borderBottomColor = 'transparent'}>
+                              {done && '🎉 '}{goal.name} <span style={{ fontSize: 9, opacity: 0.4 }}>✎</span>
+                            </div>
+                        }
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontSize: 10, color: '#7a8099', marginBottom: 2 }}>Saved / Target</div>
+                        <div style={{ fontSize: 14, color: goal.color, fontVariantNumeric: 'tabular-nums' }}>
+                          {editingGoal?.id === goal.id && editingGoal.field === 'saved'
+                            ? <AutoInput value={String(goal.saved)} onCommit={v => commitGoalEdit(goal.id, 'saved', v)} onCancel={() => setEditingGoal(null)} style={{ background: '#1e2130', border: `1px solid ${goal.color}88`, borderRadius: 6, color: '#e8e2d9', fontSize: 13, padding: '2px 6px', outline: 'none', fontFamily: 'inherit', width: 80, textAlign: 'right' }} />
+                            : <span onClick={() => setEditingGoal({ id: goal.id, field: 'saved' })} style={{ cursor: 'pointer', borderBottom: `1px dashed ${goal.color}66` }}>{fmt(goal.saved)}</span>
+                          }
+                          {' / '}
+                          {editingGoal?.id === goal.id && editingGoal.field === 'target'
+                            ? <AutoInput value={String(goal.target)} onCommit={v => commitGoalEdit(goal.id, 'target', v)} onCancel={() => setEditingGoal(null)} style={{ background: '#1e2130', border: `1px solid ${goal.color}88`, borderRadius: 6, color: '#e8e2d9', fontSize: 13, padding: '2px 6px', outline: 'none', fontFamily: 'inherit', width: 80, textAlign: 'right' }} />
+                            : <span onClick={() => setEditingGoal({ id: goal.id, field: 'target' })} style={{ cursor: 'pointer', borderBottom: `1px dashed ${goal.color}44`, color: '#7a8099' }}>{fmt(goal.target)}</span>
+                          }
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#7a8099', marginBottom: 5 }}>
+                        <span style={{ color: done ? '#6ab187' : goal.color }}>{pct.toFixed(1)}% {done ? '— Goal reached! 🎉' : 'saved'}</span>
+                        <span>{fmt(goal.target - goal.saved)} to go</span>
+                      </div>
+                      <div style={{ height: 10, background: '#2a2d3a', borderRadius: 5, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', borderRadius: 5, width: `${pct}%`, background: done ? 'linear-gradient(90deg, #6ab18788, #6ab187)' : `linear-gradient(90deg, ${goal.color}88, ${goal.color})`, transition: 'width 0.5s ease' }} />
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {isPaying ? (
+                        <>
+                          <span style={{ fontSize: 12, color: '#7a8099' }}>Add: $</span>
+                          <input autoFocus value={goalAddAmount} onChange={e => setGoalAddAmount(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addToGoal(goal.id); if (e.key === 'Escape') setAddingToGoal(null) }} placeholder="0.00"
+                            style={{ background: '#1e2130', border: `1px solid ${goal.color}88`, borderRadius: 6, color: '#e8e2d9', fontSize: 13, padding: '4px 8px', outline: 'none', fontFamily: 'inherit', width: 88, textAlign: 'right' }} />
+                          <button onClick={() => addToGoal(goal.id)} style={{ background: '#6ab18722', border: '1px solid #6ab18766', borderRadius: 6, color: '#6ab187', fontSize: 12, padding: '4px 12px', cursor: 'pointer', fontFamily: 'inherit' }}>Add ✓</button>
+                          <button onClick={() => setAddingToGoal(null)} style={{ background: 'none', border: 'none', color: '#7a8099', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+                        </>
+                      ) : (
+                        <>
+                          {!done && <button onClick={() => { setAddingToGoal(goal.id); setGoalAddAmount('') }}
+                            style={{ background: `${goal.color}22`, border: `1px solid ${goal.color}55`, borderRadius: 6, color: goal.color, fontSize: 12, padding: '5px 14px', cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.15s' }}
+                            onMouseEnter={e => e.currentTarget.style.background = goal.color + '44'}
+                            onMouseLeave={e => e.currentTarget.style.background = goal.color + '22'}>
+                            💰 Add Savings
+                          </button>}
+                          {isHov && <button onClick={() => deleteGoal(goal.id)} style={{ background: 'none', border: 'none', color: '#c0656a55', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', marginLeft: 'auto', transition: 'color 0.15s' }}
+                            onMouseEnter={e => e.currentTarget.style.color = '#c0656a'}
+                            onMouseLeave={e => e.currentTarget.style.color = '#c0656a55'}>Remove</button>}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
           <div style={{ marginTop: 32, padding: '18px 22px', background: '#161924', borderRadius: 14, border: '1px solid #2a2d3a', fontSize: 13, color: '#7a8099', lineHeight: 1.9 }}>
             <div style={{ color: '#b07fc4', marginBottom: 8, fontSize: 14 }}>👶 Baby on the way — a few tips:</div>
             <div>• Aim to build <span style={{ color: '#e8e2d9' }}>3–6 months of expenses</span> in your emergency fund before baby arrives.</div>
@@ -687,6 +874,45 @@ export default function App() {
             )}
           </div>
 
+          {/* Savings goal tick boxes */}
+          {savingsGoals.filter(g => !g.paid).length > 0 || savingsGoals.length > 0 ? (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ fontSize: 11, color: '#7a8099', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>🎯 Add to Savings Goals</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {savingsGoals.filter(g => g.saved < g.target).map(goal => {
+                  const pct = goal.target > 0 ? Math.min(100, (goal.saved / goal.target) * 100) : 0
+                  return (
+                    <div key={goal.id} style={{ background: '#161924', border: `1px solid ${goal.color}33`, borderRadius: 12, padding: '12px 16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <div style={{ fontSize: 13, color: '#e8e2d9' }}>{goal.name}</div>
+                        <div style={{ fontSize: 12, color: goal.color, fontVariantNumeric: 'tabular-nums' }}>{fmt(goal.saved)} / {fmt(goal.target)}</div>
+                      </div>
+                      <div style={{ height: 6, background: '#2a2d3a', borderRadius: 3, overflow: 'hidden', marginBottom: 10 }}>
+                        <div style={{ height: '100%', borderRadius: 3, width: `${pct}%`, background: `linear-gradient(90deg, ${goal.color}88, ${goal.color})`, transition: 'width 0.4s' }} />
+                      </div>
+                      {addingToGoal === goal.id ? (
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span style={{ fontSize: 12, color: '#7a8099' }}>Add: $</span>
+                          <input autoFocus value={goalAddAmount} onChange={e => setGoalAddAmount(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addToGoal(goal.id); if (e.key === 'Escape') setAddingToGoal(null) }} placeholder="0.00"
+                            style={{ background: '#1e2130', border: `1px solid ${goal.color}88`, borderRadius: 6, color: '#e8e2d9', fontSize: 13, padding: '4px 8px', outline: 'none', fontFamily: 'inherit', width: 88, textAlign: 'right' }} />
+                          <button onClick={() => addToGoal(goal.id)} style={{ background: '#6ab18722', border: '1px solid #6ab18766', borderRadius: 6, color: '#6ab187', fontSize: 12, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit' }}>Add ✓</button>
+                          <button onClick={() => setAddingToGoal(null)} style={{ background: 'none', border: 'none', color: '#7a8099', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => { setAddingToGoal(goal.id); setGoalAddAmount('') }}
+                          style={{ background: `${goal.color}22`, border: `1px solid ${goal.color}55`, borderRadius: 6, color: goal.color, fontSize: 12, padding: '5px 14px', cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.15s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = goal.color + '44'}
+                          onMouseLeave={e => e.currentTarget.style.background = goal.color + '22'}>
+                          💰 Add to {goal.name}
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
+
           {/* Leftover card */}
           {(() => {
             const leftover = FORTNIGHTLY_INCOME - totalFortnightly - totalPurchases
@@ -753,6 +979,30 @@ export default function App() {
               <div style={{ fontSize: 24, color: '#c0656a', fontVariantNumeric: 'tabular-nums' }}>{fmt(totalOwed)}</div>
             </div>
           </div>
+
+          {/* Savings Goals Progress — blue/green at top of debts page */}
+          {savingsGoals.length > 0 && (
+            <div style={{ background: '#161924', borderRadius: 14, border: '1px solid #4ab8c433', padding: '18px 20px', marginBottom: 22 }}>
+              <div style={{ fontSize: 13, color: '#4ab8c4', marginBottom: 16 }}>🎯 Savings Goals Progress</div>
+              {savingsGoals.map(goal => {
+                const pct = goal.target > 0 ? Math.min(100, (goal.saved / goal.target) * 100) : 0
+                const done = goal.saved >= goal.target
+                const color = done ? '#6ab187' : goal.color
+                return (
+                  <div key={goal.id} style={{ marginBottom: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 5 }}>
+                      <span style={{ color: done ? '#6ab187' : '#e8e2d9' }}>{done ? '✅ ' : ''}{goal.name}</span>
+                      <span style={{ color: '#7a8099', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{fmt(goal.saved)} / {fmt(goal.target)}</span>
+                    </div>
+                    <div style={{ height: 10, background: '#2a2d3a', borderRadius: 5, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', borderRadius: 5, width: `${pct}%`, background: `linear-gradient(90deg, ${color}88, ${color})`, transition: 'width 0.5s' }} />
+                    </div>
+                    <div style={{ fontSize: 11, color, marginTop: 3 }}>{pct.toFixed(1)}% — {fmt(goal.target - goal.saved)} to go</div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {totalOriginal > 0 && (
             <div style={{ background: '#161924', borderRadius: 12, padding: '16px 20px', marginBottom: 18, border: '1px solid #2a2d3a' }}>
@@ -1054,6 +1304,71 @@ export default function App() {
             <div>• Snapshots are saved automatically at the start of each new fortnight.</div>
             <div>• History keeps up to <span style={{ color: '#e8e2d9' }}>24 fortnights</span> (~1 year) of data.</div>
             <div>• All figures sync across your phone and computer via Firebase ☁️</div>
+          </div>
+        </div>
+
+        {/* ══ SETTINGS TAB ══ */}
+        <div style={{ display: activeTab === 'settings' ? 'block' : 'none' }}>
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, letterSpacing: '0.2em', color: '#7a8099', textTransform: 'uppercase', marginBottom: 4 }}>Configuration</div>
+            <div style={{ fontSize: 22, color: '#e8e2d9' }}>⚙️ Settings</div>
+          </div>
+
+          {/* Pinned header cards */}
+          <div style={{ background: '#161924', borderRadius: 14, border: '1px solid #d4a84333', padding: '22px 24px' }}>
+            <div style={{ fontSize: 14, color: '#d4a843', marginBottom: 6 }}>📌 Header Cards</div>
+            <div style={{ fontSize: 12, color: '#7a8099', marginBottom: 16 }}>Choose which category totals appear at the top. Select up to 4.</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {categories.map(cat => {
+                const pinned = (settingsDraft?.pinnedCards || settings.pinnedCards || []).includes(cat.id)
+                const currentPinned = settingsDraft?.pinnedCards || settings.pinnedCards || []
+                const atMax = currentPinned.length >= 4
+                const total = cat.items.reduce((s, i) => s + i.amount, 0)
+                return (
+                  <div key={cat.id}
+                    onClick={() => {
+                      setSettingsDraft(d => {
+                        const base = d || { ...settings }
+                        const curr = base.pinnedCards || []
+                        const next = pinned ? curr.filter(id => id !== cat.id) : curr.length >= 4 ? curr : [...curr, cat.id]
+                        return { ...base, pinnedCards: next }
+                      })
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 10, cursor: 'pointer', background: pinned ? `${cat.color}15` : '#1a1d27', border: pinned ? `1px solid ${cat.color}55` : '1px solid #2a2d3a', transition: 'all 0.15s', opacity: (!pinned && atMax) ? 0.4 : 1 }}>
+                    <div style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0, border: pinned ? `2px solid ${cat.color}` : '2px solid #3a4060', background: pinned ? cat.color : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}>
+                      {pinned && <span style={{ color: '#0f1117', fontSize: 12, fontWeight: 'bold' }}>✓</span>}
+                    </div>
+                    <span style={{ fontSize: 15 }}>{cat.icon}</span>
+                    <div style={{ flex: 1, fontSize: 13, color: pinned ? cat.color : '#b0b8cc' }}>{cat.label}</div>
+                    <div style={{ fontSize: 13, color: pinned ? cat.color : '#7a8099', fontVariantNumeric: 'tabular-nums' }}>{fmt(total)}/mo</div>
+                  </div>
+                )
+              })}
+            </div>
+            {(settingsDraft?.pinnedCards || settings.pinnedCards || []).length >= 4 && (
+              <div style={{ marginTop: 10, fontSize: 12, color: '#d4a843' }}>Maximum of 4 cards selected.</div>
+            )}
+          </div>
+
+          {/* Save / cancel */}
+          {settingsDraft && (
+            <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+              <button onClick={() => { setSettings(settingsDraft); setSettingsDraft(null) }}
+                style={{ flex: 1, background: '#6ab18722', border: '1px solid #6ab18766', borderRadius: 10, color: '#6ab187', fontSize: 14, padding: '12px', cursor: 'pointer', fontFamily: 'inherit', transition: 'background 0.15s' }}
+                onMouseEnter={e => e.currentTarget.style.background = '#6ab18744'}
+                onMouseLeave={e => e.currentTarget.style.background = '#6ab18722'}>
+                ✓ Save Settings
+              </button>
+              <button onClick={() => setSettingsDraft(null)}
+                style={{ background: 'none', border: '1px solid #2a2d3a', borderRadius: 10, color: '#7a8099', fontSize: 14, padding: '12px 20px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                Cancel
+              </button>
+            </div>
+          )}
+
+          <div style={{ marginTop: 16, padding: '14px 18px', background: '#161924', borderRadius: 12, border: '1px solid #2a2d3a', fontSize: 12, color: '#7a8099', lineHeight: 1.8 }}>
+            <div>• Click any category above to toggle it in the header.</div>
+            <div>• Changes save automatically when you click <span style={{ color: '#e8e2d9' }}>Save Settings</span>.</div>
           </div>
         </div>
 
