@@ -438,7 +438,7 @@ export default function App() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <div style={{ fontSize: 11, letterSpacing: '0.2em', color: '#7a8099', textTransform: 'uppercase', marginBottom: 5 }}>Monthly Budget</div>
-              <div style={{ fontSize: 24, color: '#e8e2d9' }}>Your Family Plan</div>
+              <div style={{ fontSize: 24, color: '#e8e2d9' }}>Budget</div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 10, color: syncColor, marginBottom: 3 }}>{syncLabel}</div>
