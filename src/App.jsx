@@ -1,12 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { db } from './firebase'
+import { db, auth } from './firebase'
 import { doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const INCOME = 4537.92
 const FORTNIGHTLY_INCOME = INCOME / 2
 const DOC_ID = 'my-budget'
+const ALLOWED_EMAIL = 'j.maddocks43@gmail.com'
 
 const initialCategories = [
   { id: 'housing',   label: 'Housing',          icon: '🏠', color: '#e07b54', items: [{ name: 'Rent / Mortgage', amount: 1100 }] },
@@ -79,6 +81,9 @@ export default function App() {
   const [payAmount, setPayAmount]     = useState('')
   const [celebrating, setCelebrating] = useState(null)
   const [syncStatus, setSyncStatus]   = useState('loading')
+  const [user, setUser]               = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [authError, setAuthError]     = useState('')
 
   // Fortnightly checklist state: { [fortnightKey]: { [itemKey]: bool } }
   const [fortnightChecks, setFortnightChecks] = useState({})
@@ -113,6 +118,37 @@ export default function App() {
   const lastSnapshotKey = useRef(null)
 
   const currentFortnightKey = getFortnightKey()
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, u => {
+      if (u && u.email === ALLOWED_EMAIL) {
+        setUser(u)
+      } else {
+        setUser(null)
+        if (u) signOut(auth) // signed in but wrong account
+      }
+      setAuthLoading(false)
+    })
+    return () => unsub()
+  }, [])
+
+  async function handleSignIn() {
+    setAuthError('')
+    try {
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({ login_hint: ALLOWED_EMAIL })
+      const result = await signInWithPopup(auth, provider)
+      if (result.user.email !== ALLOWED_EMAIL) {
+        await signOut(auth)
+        setAuthError('Access denied. Please sign in with the authorised account.')
+      }
+    } catch (e) {
+      if (e.code !== 'auth/popup-closed-by-user') setAuthError('Sign in failed. Please try again.')
+    }
+  }
+
+  async function handleSignOut() { await signOut(auth) }
 
   // ── Firebase: load ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -413,6 +449,62 @@ export default function App() {
   const syncLabel     = { loading: '⏳ Loading...', saving: '💾 Saving...', synced: '☁️ Synced', error: '⚠️ Sync error' }[syncStatus]
   const syncColor     = { loading: '#7a8099', saving: '#d4a843', synced: '#6ab187', error: '#c0656a' }[syncStatus]
 
+  // ── Auth gate ─────────────────────────────────────────────────────────────
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0f1117', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Georgia, serif', color: '#7a8099', fontSize: 16 }}>
+        ⏳ Loading...
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0f1117', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Georgia', serif", padding: 24 }}>
+        <div style={{ width: '100%', maxWidth: 380, textAlign: 'center' }}>
+          {/* Logo */}
+          <div style={{ fontSize: 56, marginBottom: 16 }}>💰</div>
+          <div style={{ fontSize: 11, letterSpacing: '0.25em', color: '#7a8099', textTransform: 'uppercase', marginBottom: 8 }}>Family Budget</div>
+          <div style={{ fontSize: 28, color: '#e8e2d9', marginBottom: 8 }}>Budget</div>
+          <div style={{ fontSize: 14, color: '#7a8099', marginBottom: 40 }}>Sign in to access your budget</div>
+
+          {/* Sign in card */}
+          <div style={{ background: '#161924', border: '1px solid #2a2d3a', borderRadius: 16, padding: '32px 28px' }}>
+            <button onClick={handleSignIn}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+                background: '#ffffff', border: 'none', borderRadius: 10,
+                color: '#1a1a1a', fontSize: 15, fontWeight: 'bold', padding: '14px 20px',
+                cursor: 'pointer', fontFamily: 'inherit', transition: 'opacity 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity = '0.9'}
+              onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
+              {/* Google icon */}
+              <svg width="20" height="20" viewBox="0 0 48 48">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                <path fill="none" d="M0 0h48v48H0z"/>
+              </svg>
+              Sign in with Google
+            </button>
+
+            {authError && (
+              <div style={{ marginTop: 16, fontSize: 13, color: '#c0656a', background: '#c0656a15', border: '1px solid #c0656a44', borderRadius: 8, padding: '10px 14px' }}>
+                {authError}
+              </div>
+            )}
+
+            <div style={{ marginTop: 20, fontSize: 12, color: '#3a4060' }}>
+              Only authorised accounts can access this app.
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (syncStatus === 'loading') {
     return (
       <div style={{ minHeight: '100vh', background: '#0f1117', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Georgia, serif', color: '#7a8099', fontSize: 16 }}>
@@ -438,7 +530,7 @@ export default function App() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <div style={{ fontSize: 11, letterSpacing: '0.2em', color: '#7a8099', textTransform: 'uppercase', marginBottom: 5 }}>Monthly Budget</div>
-              <div style={{ fontSize: 24, color: '#e8e2d9' }}>Budget</div>
+              <div style={{ fontSize: 24, color: '#e8e2d9' }}>Your Family Plan</div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 10, color: syncColor, marginBottom: 3 }}>{syncLabel}</div>
